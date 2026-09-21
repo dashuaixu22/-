@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>武汉算力网运营端平台</title>
+    <meta name="description" content="Professional data-driven platform for monitoring provider performance, transaction trends, and revenue growth in Wuhan's city computing network." />
+    <meta property="og:title" content="武汉算力网运营端平台" />
+    <meta property="og:description" content="Professional data-driven platform for monitoring provider performance, transaction trends, and revenue growth in Wuhan's city computing network." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Early protection against benign browser ResizeObserver notifications and iframe script errors
+      window.addEventListener('error', function(e) {
+        var msg = (e && e.message) || '';
+        if (
+          msg === 'ResizeObserver loop completed with undelivered notifications.' ||
+          msg === 'ResizeObserver loop limit exceeded' ||
+          msg.indexOf('ResizeObserver') !== -1 ||
+          (msg === 'Script error.' && !e.filename)
+        ) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          return true;
+        }
+      }, true);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
