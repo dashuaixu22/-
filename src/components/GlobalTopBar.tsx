@@ -61,7 +61,7 @@ export const GlobalTopBar: React.FC<GlobalTopBarProps> = ({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[14.5px] font-bold text-white tracking-wide font-sans">
-              武汉算力网运营平台
+              武汉算力网运营看板
             </span>
           </div>
         </div>
@@ -175,7 +175,7 @@ export const GlobalTopBar: React.FC<GlobalTopBarProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-blue-600" />
-                武汉算力网运营平台 - 使用指南
+                武汉算力网运营看板 - 使用指南
               </h3>
               <button
                 type="button"
