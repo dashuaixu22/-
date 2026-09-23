@@ -49,6 +49,21 @@ const MENU_TITLE_MAP: Record<string, string> = {
   demand_order_detail: '消费订单详情',
 };
 
+const SHOW_TIME_FILTER_MENUS = [
+  // 平台O-供应商S运营
+  'business_overview',
+  'supply_demand_tx',
+  'vas_operations',
+  'supplier_count',
+  'supplier_consumption',
+  // 平台O-需求端B/C运营：规模概览、消费分析、产品订购右上角展示时间选择
+  'demand_overview',
+  'demand_scale',
+  'demand_consumption',
+  'demand_trade_analysis',
+  'demand_trade_products',
+];
+
 export const Header: React.FC<HeaderProps> = ({
   activeMenu,
   timeRange,
@@ -128,7 +143,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* 最右侧：Tab选择 (当日、近一周、近一月、近一年、自选时间段) + 时间选择框 (开始时间 - 结束时间) */}
-        {['business_overview', 'supply_demand_tx', 'vas_operations', 'supplier_count', 'supplier_consumption'].includes(activeMenu) && (
+        {SHOW_TIME_FILTER_MENUS.includes(activeMenu) && (
           <div className="flex items-center gap-3 md:gap-4">
             {/* Tab选择 */}
             <div

@@ -11,6 +11,7 @@ import {
   AlertCircle,
   HelpCircle,
   TrendingUp,
+  Calendar,
 } from 'lucide-react';
 import { EChartWrapper } from '../EChartWrapper';
 import {
@@ -20,15 +21,28 @@ import {
   FixedProductCategory,
 } from '../../data/demandMockData';
 import { CATEGORY_COLORS } from '../../data/supplierProductsMockData';
+import { TimeRangeType } from '../../types';
 
 interface DemandServiceViewProps {
   activeTab?: 'feedback' | 'usage';
   onActiveTabChange?: (tab: 'feedback' | 'usage') => void;
+  timeRange?: TimeRangeType;
+  startDate?: string;
+  endDate?: string;
+  onTimeRangeChange?: (range: TimeRangeType) => void;
+  onStartDateChange?: (date: string) => void;
+  onEndDateChange?: (date: string) => void;
 }
 
 export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
   activeTab: controlledTab,
   onActiveTabChange,
+  timeRange: controlledTimeRange,
+  startDate: controlledStartDate,
+  endDate: controlledEndDate,
+  onTimeRangeChange,
+  onStartDateChange,
+  onEndDateChange,
 }) => {
   // 页面内部Tab: 反馈与投诉 (feedback) | 平台使用情况 (usage)
   const [internalTab, setInternalTab] = useState<'feedback' | 'usage'>('feedback');
@@ -42,18 +56,94 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
   };
 
   // =========================================================================
-  // 1. 反馈与投诉部分状态与逻辑 (统一时间Tab，包含当日)
+  // 1. 反馈与投诉部分状态与逻辑 (统一时间Tab，包含当日与自选时间段)
   // =========================================================================
-  // 统一时间Tab: 当日 | 近一周 | 近一月 | 近一年
-  const [serviceTimeRange, setServiceTimeRange] = useState<'today' | 'week' | 'month' | 'year'>('year');
+  const [localTimeRange, setLocalTimeRange] = useState<TimeRangeType>('year');
+  const [localStartDate, setLocalStartDate] = useState<string>('2025-09-01');
+  const [localEndDate, setLocalEndDate] = useState<string>('2026-09-22');
 
-  const feedbackVolumeData = {
-    totalCumulative: 1248,
-    today: { count: 2, rate: '-12.5%', label: '当日新增' },
-    week: { count: 18, rate: '-10.0%', label: '近一周新增' },
-    month: { count: 76, rate: '-6.2%', label: '近一月新增' },
-    year: { count: 342, rate: '-14.5%', label: '近一年新增' },
+  const effectiveTimeRange = controlledTimeRange !== undefined ? controlledTimeRange : localTimeRange;
+  const effectiveStartDate = controlledStartDate !== undefined ? controlledStartDate : localStartDate;
+  const effectiveEndDate = controlledEndDate !== undefined ? controlledEndDate : localEndDate;
+
+  const handleTimeRangeChange = (range: TimeRangeType) => {
+    setLocalTimeRange(range);
+    if (onTimeRangeChange) {
+      onTimeRangeChange(range);
+    }
+    const end = '2026-09-22';
+    let start = '2025-09-01';
+    if (range === 'today') start = '2026-09-22';
+    else if (range === 'week') start = '2026-09-16';
+    else if (range === 'month') start = '2026-08-23';
+    else if (range === 'year') start = '2025-09-01';
+    setLocalStartDate(start);
+    setLocalEndDate(end);
+    if (onStartDateChange) onStartDateChange(start);
+    if (onEndDateChange) onEndDateChange(end);
   };
+
+  const handleStartDateChange = (val: string) => {
+    setLocalStartDate(val);
+    if (onStartDateChange) onStartDateChange(val);
+    setLocalTimeRange('custom');
+    if (onTimeRangeChange) onTimeRangeChange('custom');
+  };
+
+  const handleEndDateChange = (val: string) => {
+    setLocalEndDate(val);
+    if (onEndDateChange) onEndDateChange(val);
+    setLocalTimeRange('custom');
+    if (onTimeRangeChange) onTimeRangeChange('custom');
+  };
+
+  // 计算自选天数与限制
+  const customDays = useMemo(() => {
+    if (effectiveTimeRange !== 'custom' || !effectiveStartDate || !effectiveEndDate) {
+      return 1;
+    }
+    const startMs = new Date(effectiveStartDate).getTime();
+    const endMs = new Date(effectiveEndDate).getTime();
+    const diff = Math.round((endMs - startMs) / (1000 * 3600 * 24)) + 1;
+    return diff > 0 ? diff : 1;
+  }, [effectiveTimeRange, effectiveStartDate, effectiveEndDate]);
+
+  const isOverLimit = effectiveTimeRange === 'custom' && customDays > 30;
+
+  const feedbackVolumeData = useMemo(() => {
+    let count = 342;
+    let rate = '-14.5%';
+    let label = '近一年';
+
+    if (effectiveTimeRange === 'today') {
+      count = 2;
+      rate = '-12.5%';
+      label = '当日';
+    } else if (effectiveTimeRange === 'week') {
+      count = 18;
+      rate = '-10.0%';
+      label = '近一周';
+    } else if (effectiveTimeRange === 'month') {
+      count = 76;
+      rate = '-6.2%';
+      label = '近一月';
+    } else if (effectiveTimeRange === 'year') {
+      count = 342;
+      rate = '-14.5%';
+      label = '近一年';
+    } else {
+      count = Math.max(1, Math.round(customDays * 2.5));
+      rate = '-8.3%';
+      label = `自选(${customDays}天)`;
+    }
+
+    return {
+      totalCumulative: 1248,
+      currentCount: count,
+      currentRate: rate,
+      label,
+    };
+  }, [effectiveTimeRange, customDays]);
 
   // 下方筛选条件
   const [feedbackCustType, setFeedbackCustType] = useState<'全部' | '企业' | '个人用户'>('全部');
@@ -66,13 +156,22 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
 
     // 针对每个类别构造企业与个人用户的反馈数量，按时间周期动态适配
     const countMultipliers =
-      serviceTimeRange === 'today' ? 0.12 : serviceTimeRange === 'week' ? 1 : serviceTimeRange === 'month' ? 4.2 : 19;
+      effectiveTimeRange === 'today'
+        ? 0.12
+        : effectiveTimeRange === 'week'
+        ? 1
+        : effectiveTimeRange === 'month'
+        ? 4.2
+        : effectiveTimeRange === 'year'
+        ? 19
+        : Math.max(0.2, (customDays / 7) * 1.0);
+
     const baseCompany = [6, 4, 3, 2, 2, 1, 1];
     const baseIndividual = [4, 5, 2, 1, 3, 0, 1];
 
     const companyCounts = baseCompany.map((v) => Math.max(Math.round(v * countMultipliers), 0));
     const individualCounts = baseIndividual.map((v) => Math.max(Math.round(v * countMultipliers), 0));
-    if (serviceTimeRange === 'today') {
+    if (effectiveTimeRange === 'today') {
       companyCounts[0] = 1;
       companyCounts[1] = 1;
       individualCounts[1] = 1;
@@ -146,7 +245,7 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
       },
       series,
     };
-  }, [feedbackCategory, feedbackCustType, serviceTimeRange]);
+  }, [feedbackCategory, feedbackCustType, effectiveTimeRange, customDays]);
 
   // 过滤后的明细列表 (严格遵守：不展示处理状态、责任人、处理进度等未要求字段)
   const filteredFeedbacks = useMemo(() => {
@@ -160,35 +259,66 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
   // =========================================================================
   // 2. 平台使用情况部分 (演示口径)
   // =========================================================================
-  const usageStats = {
-    today: { company: '44.8', individual: '29.2', unit: '分钟/次' },
-    week: { company: '42.5', individual: '28.4', unit: '分钟/次' },
-    month: { company: '38.6', individual: '26.1', unit: '分钟/次' },
-    year: { company: '35.2', individual: '24.8', unit: '分钟/次' },
-  }[serviceTimeRange];
+  const usageStats = useMemo(() => {
+    if (effectiveTimeRange === 'today') {
+      return { company: '44.8', individual: '29.2', unit: '分钟/次' };
+    }
+    if (effectiveTimeRange === 'week') {
+      return { company: '42.5', individual: '28.4', unit: '分钟/次' };
+    }
+    if (effectiveTimeRange === 'month') {
+      return { company: '38.6', individual: '26.1', unit: '分钟/次' };
+    }
+    if (effectiveTimeRange === 'year') {
+      return { company: '35.2', individual: '24.8', unit: '分钟/次' };
+    }
+    return { company: '39.4', individual: '26.8', unit: '分钟/次' };
+  }, [effectiveTimeRange]);
 
-  // 演示趋势折线图
+  // 演示趋势折线图 (当日按24小时统计，自选超30天隐藏)
   const usageTrendOption = useMemo(() => {
     let categories: string[] = [];
     let companyData: number[] = [];
     let individualData: number[] = [];
 
-    if (serviceTimeRange === 'today') {
-      categories = ['02:00', '06:00', '10:00', '14:00', '18:00', '22:00'];
-      companyData = [36.0, 39.5, 46.2, 48.0, 47.5, 42.0];
-      individualData = [23.5, 26.0, 29.8, 31.0, 30.5, 28.0];
-    } else if (serviceTimeRange === 'week') {
+    if (effectiveTimeRange === 'today') {
+      categories = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
+      companyData = [
+        18, 15, 12, 10, 11, 14, 22, 32, 42, 46, 48, 45,
+        38, 44, 47, 49, 46, 42, 38, 35, 32, 28, 24, 20
+      ];
+      individualData = [
+        12, 10, 8, 7, 7, 9, 15, 22, 28, 31, 32, 30,
+        25, 29, 31, 33, 30, 27, 25, 23, 21, 18, 16, 14
+      ];
+    } else if (effectiveTimeRange === 'week') {
       categories = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
       companyData = [38.2, 41.5, 45.0, 44.2, 46.8, 36.5, 35.0];
       individualData = [25.0, 27.2, 28.5, 29.0, 30.5, 32.0, 31.5];
-    } else if (serviceTimeRange === 'month') {
+    } else if (effectiveTimeRange === 'month') {
       categories = ['第1周', '第2周', '第3周', '第4周'];
       companyData = [36.5, 38.2, 40.1, 39.5];
       individualData = [24.5, 25.8, 27.0, 26.8];
+    } else if (effectiveTimeRange === 'year') {
+      categories = ['2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09'];
+      companyData = [32.0, 32.8, 33.5, 34.0, 34.8, 35.5, 36.2, 36.8, 37.5, 38.0, 38.6, 39.2];
+      individualData = [22.0, 22.5, 23.1, 23.6, 24.2, 24.6, 25.0, 25.4, 26.0, 26.3, 26.5, 27.0];
     } else {
-      categories = ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08'];
-      companyData = [32.0, 33.5, 34.8, 36.2, 37.5, 38.6];
-      individualData = [22.0, 23.1, 24.2, 25.0, 26.0, 26.5];
+      // 自选时间段 (小于等于30天)
+      const days = Math.min(customDays, 30);
+      categories = [];
+      companyData = [];
+      individualData = [];
+      const startMs = new Date(effectiveStartDate).getTime();
+      for (let i = 0; i < days; i++) {
+        const d = new Date(startMs + i * 86400000);
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        categories.push(`${mm}-${dd}`);
+        const pseudo = Math.sin(i * 0.8) * 4;
+        companyData.push(Number((38 + pseudo).toFixed(1)));
+        individualData.push(Number((26 + pseudo * 0.7).toFixed(1)));
+      }
     }
 
     return {
@@ -210,7 +340,11 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
         type: 'category',
         data: categories,
         axisLine: { lineStyle: { color: '#CBD5E1' } },
-        axisLabel: { color: '#475569', fontSize: 11 },
+        axisLabel: {
+          color: '#475569',
+          fontSize: effectiveTimeRange === 'today' ? 10 : 11,
+          interval: effectiveTimeRange === 'today' ? 0 : categories.length > 20 ? 1 : 0,
+        },
       },
       yAxis: {
         type: 'value',
@@ -226,7 +360,7 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
           smooth: false,
           data: companyData,
           itemStyle: { color: '#2563EB' },
-          lineStyle: { width: 3 },
+          lineStyle: { width: 2.5 },
         },
         {
           name: '个人用户',
@@ -234,11 +368,11 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
           smooth: false,
           data: individualData,
           itemStyle: { color: '#06B6D4' },
-          lineStyle: { width: 3 },
+          lineStyle: { width: 2.5 },
         },
       ],
     };
-  }, [serviceTimeRange]);
+  }, [effectiveTimeRange, customDays, effectiveStartDate]);
 
   return (
     <div className="space-y-4">
@@ -251,16 +385,16 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
           </span>
         </div>
 
-        {/* 右上角统一时间选择Tab (包含当日) */}
-        <div className="flex items-center gap-2">
+        {/* 右上角统一时间选择Tab与自选时间段 */}
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-500 font-medium hidden sm:inline">统计周期:</span>
           <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs font-medium text-slate-600 shadow-2xs">
             <button
               type="button"
               id="btn-service-time-today"
-              onClick={() => setServiceTimeRange('today')}
+              onClick={() => handleTimeRangeChange('today')}
               className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                serviceTimeRange === 'today'
+                effectiveTimeRange === 'today'
                   ? 'bg-white font-semibold text-blue-600 shadow-2xs'
                   : 'hover:text-slate-900 text-slate-600'
               }`}
@@ -270,9 +404,9 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
             <button
               type="button"
               id="btn-service-time-week"
-              onClick={() => setServiceTimeRange('week')}
+              onClick={() => handleTimeRangeChange('week')}
               className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                serviceTimeRange === 'week'
+                effectiveTimeRange === 'week'
                   ? 'bg-white font-semibold text-blue-600 shadow-2xs'
                   : 'hover:text-slate-900 text-slate-600'
               }`}
@@ -282,9 +416,9 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
             <button
               type="button"
               id="btn-service-time-month"
-              onClick={() => setServiceTimeRange('month')}
+              onClick={() => handleTimeRangeChange('month')}
               className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                serviceTimeRange === 'month'
+                effectiveTimeRange === 'month'
                   ? 'bg-white font-semibold text-blue-600 shadow-2xs'
                   : 'hover:text-slate-900 text-slate-600'
               }`}
@@ -294,15 +428,50 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
             <button
               type="button"
               id="btn-service-time-year"
-              onClick={() => setServiceTimeRange('year')}
+              onClick={() => handleTimeRangeChange('year')}
               className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                serviceTimeRange === 'year'
+                effectiveTimeRange === 'year'
                   ? 'bg-white font-semibold text-blue-600 shadow-2xs'
                   : 'hover:text-slate-900 text-slate-600'
               }`}
             >
               近一年
             </button>
+          </div>
+
+          {/* 时间选择框：开始时间 - 结束时间（自选时间段） */}
+          <div
+            className={`flex items-center bg-white border ${
+              effectiveTimeRange === 'custom'
+                ? 'border-blue-500 ring-2 ring-blue-400/30 shadow-xs'
+                : 'border-slate-200'
+            } rounded px-2.5 py-1 text-xs text-slate-700 hover:border-slate-300 focus-within:ring-2 focus-within:ring-blue-500 transition-all`}
+            title="选择开始与结束时间，自动生效自选时间段"
+          >
+            <Calendar
+              className={`w-3.5 h-3.5 mr-1.5 shrink-0 ${
+                effectiveTimeRange === 'custom' ? 'text-blue-600' : 'text-slate-400'
+              }`}
+            />
+            <input
+              type="date"
+              value={effectiveStartDate}
+              onChange={(e) => handleStartDateChange(e.target.value)}
+              className={`border-none bg-transparent p-0 text-xs focus:outline-none cursor-pointer w-[105px] ${
+                effectiveTimeRange === 'custom' ? 'text-blue-900 font-medium' : 'text-slate-700'
+              }`}
+              title="开始时间"
+            />
+            <span className="text-slate-400 mx-1 font-medium">-</span>
+            <input
+              type="date"
+              value={effectiveEndDate}
+              onChange={(e) => handleEndDateChange(e.target.value)}
+              className={`border-none bg-transparent p-0 text-xs focus:outline-none cursor-pointer w-[105px] ${
+                effectiveTimeRange === 'custom' ? 'text-blue-900 font-medium' : 'text-slate-700'
+              }`}
+              title="结束时间"
+            />
           </div>
         </div>
       </div>
@@ -342,21 +511,21 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
                   周期新增反馈与投诉量
                 </span>
                 <span className="text-[11px] text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                  {feedbackVolumeData[serviceTimeRange].label}
+                  {feedbackVolumeData.label}
                 </span>
               </div>
               <div className="py-2.5">
                 <div className="flex items-baseline gap-2">
                   <span className="text-2xl font-bold text-slate-900 tracking-tight">
-                    {feedbackVolumeData[serviceTimeRange].count}
+                    {feedbackVolumeData.currentCount}
                   </span>
                   <span className="text-xs text-slate-500">件</span>
                   <span className="text-xs text-emerald-600 font-medium ml-2">
-                    同比 {feedbackVolumeData[serviceTimeRange].rate}
+                    同比 {feedbackVolumeData.currentRate}
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">
-                  展示当前筛选周期（{feedbackVolumeData[serviceTimeRange].label}）内新增归集的服务反馈总数
+                  展示当前筛选周期（{effectiveTimeRange === 'custom' ? `${effectiveStartDate} 至 ${effectiveEndDate}` : feedbackVolumeData.label}）内新增归集的服务反馈总数
                 </div>
               </div>
             </div>
@@ -533,7 +702,15 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
                   企业用户平均单次平台使用时长
                 </span>
                 <span className="text-[11px] text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                  {serviceTimeRange === 'today' ? '当日实时' : serviceTimeRange === 'week' ? '近一周' : serviceTimeRange === 'month' ? '近一月' : '近一年'}
+                  {effectiveTimeRange === 'today'
+                    ? '当日实时'
+                    : effectiveTimeRange === 'week'
+                    ? '近一周'
+                    : effectiveTimeRange === 'month'
+                    ? '近一月'
+                    : effectiveTimeRange === 'year'
+                    ? '近一年'
+                    : `自选(${customDays}天)`}
                 </span>
               </div>
               <div className="py-2.5">
@@ -555,7 +732,15 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
                   个人用户平均单次平台使用时长
                 </span>
                 <span className="text-[11px] text-cyan-600 font-medium bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-100">
-                  {serviceTimeRange === 'today' ? '当日实时' : serviceTimeRange === 'week' ? '近一周' : serviceTimeRange === 'month' ? '近一月' : '近一年'}
+                  {effectiveTimeRange === 'today'
+                    ? '当日实时'
+                    : effectiveTimeRange === 'week'
+                    ? '近一周'
+                    : effectiveTimeRange === 'month'
+                    ? '近一月'
+                    : effectiveTimeRange === 'year'
+                    ? '近一年'
+                    : `自选(${customDays}天)`}
                 </span>
               </div>
               <div className="py-2.5">
@@ -583,9 +768,19 @@ export const DemandServiceView: React.FC<DemandServiceViewProps> = ({
                 单位: 分钟/次 (区分企业与个人)
               </span>
             </div>
-            <div className="h-[280px] w-full">
-              <EChartWrapper option={usageTrendOption} height="100%" />
-            </div>
+            {isOverLimit ? (
+              <div className="h-[280px] w-full flex flex-col items-center justify-center bg-slate-50/70 rounded border border-dashed border-slate-200 text-slate-500">
+                <AlertCircle className="w-8 h-8 text-amber-500 mb-2" />
+                <p className="text-xs font-semibold text-slate-700">自选时间段跨度超过 30 天</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  为保障图表展示清晰度，日级趋势折线图仅支持展示 30 天以内的数据，请缩短筛选区间
+                </p>
+              </div>
+            ) : (
+              <div className="h-[280px] w-full">
+                <EChartWrapper option={usageTrendOption} height="100%" />
+              </div>
+            )}
           </div>
         </div>
       )}

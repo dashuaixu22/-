@@ -209,6 +209,12 @@ export default function App() {
                   onActiveTabChange={(tab) => {
                     setActiveMenu(tab === 'query' ? 'demand_query' : 'demand_scale');
                   }}
+                  timeRange={timeRange}
+                  startDate={startDate}
+                  endDate={endDate}
+                  onTimeRangeChange={setTimeRange}
+                  onStartDateChange={setStartDate}
+                  onEndDateChange={setEndDate}
                   onViewCustomerDetail={(customer) => {
                     setSelectedDemandCustomer(customer);
                     setActiveMenu('demand_customer_detail');
@@ -255,6 +261,12 @@ export default function App() {
                         : 'demand_trade_analysis'
                     );
                   }}
+                  timeRange={timeRange}
+                  startDate={startDate}
+                  endDate={endDate}
+                  onTimeRangeChange={setTimeRange}
+                  onStartDateChange={setStartDate}
+                  onEndDateChange={setEndDate}
                   onViewOrderDetail={(order) => {
                     setSelectedDemandOrder(order);
                     setActiveMenu('demand_order_detail');

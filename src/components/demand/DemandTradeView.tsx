@@ -16,6 +16,7 @@ import {
   Check,
   ExternalLink,
   CreditCard,
+  AlertCircle,
 } from 'lucide-react';
 import { EChartWrapper } from '../EChartWrapper';
 import {
@@ -29,6 +30,8 @@ import {
   CATEGORY_COLORS,
   SupplierProductRecord,
 } from '../../data/supplierProductsMockData';
+import { TimeRangeType } from '../../types';
+import { TODAY } from '../../data/mockData';
 
 interface DemandTradeViewProps {
   onViewOrderDetail: (order: DemandOrderRecord) => void;
@@ -54,6 +57,256 @@ interface DemandTradeViewProps {
   onSaveSearchState?: (state: any) => void;
   activeTab?: 'analysis' | 'products' | 'orders';
   onActiveTabChange?: (tab: 'analysis' | 'products' | 'orders') => void;
+  timeRange?: TimeRangeType;
+  startDate?: string;
+  endDate?: string;
+  onTimeRangeChange?: (range: TimeRangeType) => void;
+  onStartDateChange?: (date: string) => void;
+  onEndDateChange?: (date: string) => void;
+}
+
+function parseDateStr(str: string): Date {
+  const parts = str.split('-');
+  return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+}
+
+function formatMMDD(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${m}-${day}`;
+}
+
+export interface TradeTrendResult {
+  dates: string[];
+  orderData: number[];
+  amountData: number[];
+  isOverLimit: boolean;
+  diffDays: number;
+  subLabel: string;
+  unitLabel: string;
+  xAxisType: 'hour' | 'day' | 'month';
+  totalOrders: number;
+  totalAmount: number;
+  newProducts: number;
+}
+
+/**
+ * 需求方交易趋势计算（严格遵守 5 大核心展示规则）：
+ * 1. 选择当日：展示 24 个小时（0:00 至 23:00），逐小时统计
+ * 2. 选择近一周：返回 7 日每日
+ * 3. 选择近一月：返回近 30 日的每日
+ * 4. 选择近一年：返回从上个月往前推 12 个月的数据，每个月都是对应月份的总计
+ * 5. 自选时间段：展示全部，如果时间大于 30 天，那么不展示折线图
+ */
+export function computeDemandTradeTrendData(
+  timeRange: TimeRangeType,
+  startDateStr?: string,
+  endDateStr?: string,
+  customerType: 'all' | 'company' | 'individual' = 'all'
+): TradeTrendResult {
+  const refEnd = endDateStr || TODAY;
+  const refStart = startDateStr || '2026-08-15';
+  const orderMul = customerType === 'all' ? 1 : customerType === 'company' ? 0.77 : 0.23;
+  const amountMul = customerType === 'all' ? 1 : customerType === 'company' ? 0.95 : 0.05;
+
+  // 1. 当日：24个小时（0:00 至 23:00），逐小时统计
+  if (timeRange === 'today') {
+    const dates = [
+      '0:00', '1:00', '2:00', '3:00', '4:00', '5:00',
+      '6:00', '7:00', '8:00', '9:00', '10:00', '11:00',
+      '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+      '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
+    ];
+    // 58笔订单在24小时的分布
+    const rawOrders = [
+      0, 0, 1, 0, 0, 1,
+      1, 2, 4, 6, 7, 5,
+      4, 5, 6, 5, 4, 3,
+      2, 1, 1, 0, 0, 0
+    ];
+    // 42.6万元在24小时的分布
+    const rawAmounts = [
+      0, 0, 0.4, 0, 0, 0.6,
+      0.8, 1.8, 3.2, 4.8, 5.5, 4.2,
+      3.5, 4.2, 4.9, 3.8, 2.8, 1.8,
+      1.1, 0.7, 0.6, 0, 0, 0
+    ];
+    const orderData = rawOrders.map(v => Math.round(v * orderMul));
+    const amountData = rawAmounts.map(v => +(v * amountMul).toFixed(1));
+    const totalOrders = orderData.reduce((a, b) => a + b, 0);
+    const totalAmount = +(amountData.reduce((a, b) => a + b, 0)).toFixed(1);
+
+    return {
+      dates,
+      orderData,
+      amountData,
+      isOverLimit: false,
+      diffDays: 1,
+      subLabel: '当日 24 小时交易走势（共 24 个时段，逐小时统计）',
+      unitLabel: '时段交易',
+      xAxisType: 'hour',
+      totalOrders: totalOrders || (customerType === 'company' ? 44 : customerType === 'individual' ? 14 : 58),
+      totalAmount: totalAmount || (customerType === 'company' ? 40.5 : customerType === 'individual' ? 2.1 : 42.6),
+      newProducts: 1,
+    };
+  }
+
+  // 2. 近一周：返回 7 日每日
+  if (timeRange === 'week') {
+    const end = parseDateStr(refEnd);
+    const dates: string[] = [];
+    const rawOrders = [48, 62, 75, 68, 82, 45, 32];
+    const rawAmounts = [34.0, 45.5, 52.0, 48.0, 58.5, 26.5, 20.0];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(end);
+      d.setDate(end.getDate() - i);
+      dates.push(formatMMDD(d));
+    }
+    const orderData = rawOrders.map(v => Math.round(v * orderMul));
+    const amountData = rawAmounts.map(v => +(v * amountMul).toFixed(1));
+    return {
+      dates,
+      orderData,
+      amountData,
+      isOverLimit: false,
+      diffDays: 7,
+      subLabel: `近一周每日交易走势（共 7 日，${dates[0]} 至 ${dates[dates.length - 1]}）`,
+      unitLabel: '每日交易',
+      xAxisType: 'day',
+      totalOrders: customerType === 'company' ? 310 : customerType === 'individual' ? 102 : 412,
+      totalAmount: customerType === 'company' ? 272.0 : customerType === 'individual' ? 12.5 : 284.5,
+      newProducts: 4,
+    };
+  }
+
+  // 3. 近一月：返回近 30 日每日
+  if (timeRange === 'month') {
+    const end = parseDateStr(refEnd);
+    const dates: string[] = [];
+    const rawOrders: number[] = [
+      55, 62, 58, 65, 70, 48, 52,
+      60, 68, 72, 64, 59, 61, 73,
+      66, 60, 58, 63, 67, 71, 55,
+      59, 64, 69, 58, 62, 66, 70,
+      57, 60
+    ];
+    const rawAmounts: number[] = [
+      38.0, 42.5, 39.0, 45.0, 48.5, 32.0, 36.5,
+      41.0, 46.5, 49.0, 43.5, 40.0, 42.0, 50.0,
+      45.0, 41.0, 39.5, 43.0, 46.0, 48.5, 37.0,
+      40.5, 44.0, 47.0, 39.5, 42.5, 45.0, 48.0,
+      39.0, 41.0
+    ];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(end);
+      d.setDate(end.getDate() - i);
+      dates.push(formatMMDD(d));
+    }
+    const orderData = rawOrders.map(v => Math.round(v * orderMul));
+    const amountData = rawAmounts.map(v => +(v * amountMul).toFixed(1));
+    return {
+      dates,
+      orderData,
+      amountData,
+      isOverLimit: false,
+      diffDays: 30,
+      subLabel: `近一月每日交易走势（共 30 日，${dates[0]} 至 ${dates[dates.length - 1]}）`,
+      unitLabel: '每日交易',
+      xAxisType: 'day',
+      totalOrders: customerType === 'company' ? 1420 : customerType === 'individual' ? 430 : 1850,
+      totalAmount: customerType === 'company' ? 1205.0 : customerType === 'individual' ? 55.0 : 1260.0,
+      newProducts: 12,
+    };
+  }
+
+  // 4. 近一年：从上个月往前推 12 个月的数据，每个月都是对应月份总计
+  if (timeRange === 'year') {
+    const end = parseDateStr(refEnd);
+    const endYear = end.getFullYear();
+    const endMonth = end.getMonth();
+
+    const dates: string[] = [];
+    const rawOrders = [650, 720, 780, 810, 850, 890, 840, 920, 880, 960, 910, 950];
+    const rawAmounts = [460.0, 510.0, 560.0, 580.0, 610.0, 640.0, 600.0, 660.0, 630.0, 690.0, 650.0, 680.0];
+
+    for (let i = 11; i >= 0; i--) {
+      const targetDate = new Date(endYear, endMonth - 1 - i, 1);
+      const y = targetDate.getFullYear();
+      const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+      dates.push(`${y}-${m}`);
+    }
+    const orderData = rawOrders.map(v => Math.round(v * orderMul));
+    const amountData = rawAmounts.map(v => +(v * amountMul).toFixed(1));
+
+    return {
+      dates,
+      orderData,
+      amountData,
+      isOverLimit: false,
+      diffDays: 365,
+      subLabel: `近一年月度总计交易走势（从上月往前推 12 个月：${dates[0]} 至 ${dates[dates.length - 1]}）`,
+      unitLabel: '月度总计',
+      xAxisType: 'month',
+      totalOrders: customerType === 'company' ? 7560 : customerType === 'individual' ? 2060 : 9620,
+      totalAmount: customerType === 'company' ? 6540.0 : customerType === 'individual' ? 310.0 : 6850.0,
+      newProducts: 48,
+    };
+  }
+
+  // 5. 自选时间段：展示全部，如果时间大于30天，那么不展示
+  const sDate = parseDateStr(refStart);
+  const eDate = parseDateStr(refEnd);
+  const diffMs = eDate.getTime() - sDate.getTime();
+  const diffDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1);
+
+  if (diffDays > 30) {
+    return {
+      dates: [],
+      orderData: [],
+      amountData: [],
+      isOverLimit: true,
+      diffDays,
+      subLabel: `自选时间段（${refStart} 至 ${refEnd}，共 ${diffDays} 天）`,
+      unitLabel: '每日交易',
+      xAxisType: 'day',
+      totalOrders: Math.round(diffDays * 60 * orderMul),
+      totalAmount: +(diffDays * 42.0 * amountMul).toFixed(1),
+      newProducts: Math.max(1, Math.round(diffDays * 0.4)),
+    };
+  }
+
+  // <= 30天：展示全部每日明细
+  const dates: string[] = [];
+  const orderData: number[] = [];
+  const amountData: number[] = [];
+  let totalO = 0;
+  let totalA = 0;
+
+  for (let i = 0; i < diffDays; i++) {
+    const cur = new Date(sDate);
+    cur.setDate(sDate.getDate() + i);
+    dates.push(formatMMDD(cur));
+    const oVal = Math.round((50 + ((i * 7) % 25)) * orderMul);
+    const aVal = +((35 + ((i * 4.8) % 18)) * amountMul).toFixed(1);
+    orderData.push(oVal);
+    amountData.push(aVal);
+    totalO += oVal;
+    totalA += aVal;
+  }
+
+  return {
+    dates,
+    orderData,
+    amountData,
+    isOverLimit: false,
+    diffDays,
+    subLabel: `自选时间段每日交易走势（${refStart} 至 ${refEnd}，共 ${diffDays} 天全部展示）`,
+    unitLabel: '每日交易',
+    xAxisType: 'day',
+    totalOrders: totalO,
+    totalAmount: +totalA.toFixed(1),
+    newProducts: Math.max(1, Math.round(diffDays * 0.4)),
+  };
 }
 
 export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
@@ -63,6 +316,12 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
   onSaveSearchState,
   activeTab: controlledTab,
   onActiveTabChange,
+  timeRange,
+  startDate,
+  endDate,
+  onTimeRangeChange,
+  onStartDateChange,
+  onEndDateChange,
 }) => {
   // 页面顶层Tab: 消费分析 (analysis) | 产品订购 (products) | 消费订单查询 (orders)
   const [internalTab, setInternalTab] = useState<'analysis' | 'products' | 'orders'>('analysis');
@@ -81,8 +340,74 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
   // 客户范围切换: 全部 | 企业 | 个人用户
   const [analysisCustomerType, setAnalysisCustomerType] = useState<'all' | 'company' | 'individual'>('all');
 
-  // 统一时间Tab (当日 | 近一周 | 近一月 | 近一年)
-  const [tradeTimeRange, setTradeTimeRange] = useState<'today' | 'week' | 'month' | 'year'>('year');
+  // 统一时间与自选时间段状态（支持外部 props 驱动和内部受控）
+  const [localTimeRange, setLocalTimeRange] = useState<TimeRangeType>('year');
+  const [localStartDate, setLocalStartDate] = useState<string>('2025-08-28');
+  const [localEndDate, setLocalEndDate] = useState<string>(TODAY);
+
+  const effectiveTimeRange: TimeRangeType = timeRange !== undefined ? timeRange : localTimeRange;
+  const effectiveStartDate: string = startDate !== undefined ? startDate : localStartDate;
+  const effectiveEndDate: string = endDate !== undefined ? endDate : localEndDate;
+
+  const handleTimeRangeChange = (range: TimeRangeType) => {
+    if (onTimeRangeChange) onTimeRangeChange(range);
+    else setLocalTimeRange(range);
+
+    if (range === 'today') {
+      if (onStartDateChange) onStartDateChange(TODAY);
+      else setLocalStartDate(TODAY);
+      if (onEndDateChange) onEndDateChange(TODAY);
+      else setLocalEndDate(TODAY);
+    } else if (range === 'year') {
+      if (onStartDateChange) onStartDateChange('2025-08-28');
+      else setLocalStartDate('2025-08-28');
+      if (onEndDateChange) onEndDateChange(TODAY);
+      else setLocalEndDate(TODAY);
+    } else if (range === 'month') {
+      if (onStartDateChange) onStartDateChange('2026-07-30');
+      else setLocalStartDate('2026-07-30');
+      if (onEndDateChange) onEndDateChange(TODAY);
+      else setLocalEndDate(TODAY);
+    } else if (range === 'week') {
+      if (onStartDateChange) onStartDateChange('2026-08-22');
+      else setLocalStartDate('2026-08-22');
+      if (onEndDateChange) onEndDateChange(TODAY);
+      else setLocalEndDate(TODAY);
+    } else if (range === 'custom') {
+      if (!effectiveStartDate) {
+        if (onStartDateChange) onStartDateChange('2026-08-15');
+        else setLocalStartDate('2026-08-15');
+      }
+      if (!effectiveEndDate) {
+        if (onEndDateChange) onEndDateChange(TODAY);
+        else setLocalEndDate(TODAY);
+      }
+    }
+  };
+
+  const handleStartDateChange = (val: string) => {
+    if (onStartDateChange) onStartDateChange(val);
+    else setLocalStartDate(val);
+    if (onTimeRangeChange) onTimeRangeChange('custom');
+    else setLocalTimeRange('custom');
+  };
+
+  const handleEndDateChange = (val: string) => {
+    if (onEndDateChange) onEndDateChange(val);
+    else setLocalEndDate(val);
+    if (onTimeRangeChange) onTimeRangeChange('custom');
+    else setLocalTimeRange('custom');
+  };
+
+  // 计算交易趋势数据与超期判定 (与 O-S 规则一致)
+  const tradeTrendResult = useMemo(() => {
+    return computeDemandTradeTrendData(
+      effectiveTimeRange,
+      effectiveStartDate,
+      effectiveEndDate,
+      analysisCustomerType
+    );
+  }, [effectiveTimeRange, effectiveStartDate, effectiveEndDate, analysisCustomerType]);
 
   // 指标数据
   const analysisOrderData = {
@@ -157,35 +482,66 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
     },
   }[analysisCustomerType];
 
+  // 动态结算当前周期新增金额指标
+  const currentPeriodAmount = useMemo(() => {
+    if (effectiveTimeRange === 'custom') {
+      return tradeTrendResult.totalAmount;
+    }
+    const map = {
+      today: analysisAmountData.todayNew,
+      week: analysisAmountData.weekNew,
+      month: analysisAmountData.monthNew,
+      year: analysisAmountData.yearNew,
+    };
+    return map[effectiveTimeRange as 'today' | 'week' | 'month' | 'year'] || map.year;
+  }, [effectiveTimeRange, tradeTrendResult, analysisAmountData]);
+
+  // 动态结算当前周期新增订单指标
+  const currentPeriodOrders = useMemo(() => {
+    if (effectiveTimeRange === 'custom') {
+      return tradeTrendResult.totalOrders;
+    }
+    const map = {
+      today: analysisOrderData.todayNew,
+      week: analysisOrderData.weekNew,
+      month: analysisOrderData.monthNew,
+      year: analysisOrderData.yearNew,
+    };
+    return map[effectiveTimeRange as 'today' | 'week' | 'month' | 'year'] || map.year;
+  }, [effectiveTimeRange, tradeTrendResult, analysisOrderData]);
+
   // 订单趋势图 (独立折线图)
   const orderTrendOption = useMemo(() => {
-    let months: string[] = [];
-    let baseOrders: number[] = [];
-
-    if (tradeTimeRange === 'today') {
-      months = ['02:00', '06:00', '10:00', '14:00', '18:00', '22:00'];
-      baseOrders = [2, 5, 14, 18, 11, 8];
-    } else if (tradeTimeRange === 'week') {
-      months = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-      baseOrders = [48, 62, 75, 68, 82, 45, 32];
-    } else if (tradeTimeRange === 'month') {
-      months = ['第1周', '第2周', '第3周', '第4周'];
-      baseOrders = [410, 460, 480, 500];
-    } else {
-      months = ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08'];
-      baseOrders = [1120, 1340, 1560, 1480, 1720, 1850];
-    }
-    const multipliers = analysisCustomerType === 'all' ? 1 : analysisCustomerType === 'company' ? 0.77 : 0.23;
-    const data = baseOrders.map((v) => Math.round(v * multipliers));
+    const months = tradeTrendResult.dates;
+    const data = tradeTrendResult.orderData;
 
     return {
-      tooltip: { trigger: 'axis' },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          if (!Array.isArray(params) || params.length === 0) return '';
+          const title = tradeTrendResult.xAxisType === 'hour'
+            ? `时段：当日 ${params[0].name}`
+            : tradeTrendResult.xAxisType === 'month'
+            ? `月份：${params[0].name}`
+            : `日期：${params[0].name}`;
+          return `<div style="font-size:12px;font-weight:600;color:#1e293b;margin-bottom:4px;">${title}</div>
+            <div style="font-size:12px;color:#475569;display:flex;justify-content:space-between;gap:16px;">
+              <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:${params[0].color};margin-right:6px;"></span>订单数:</span>
+              <strong>${params[0].value} 笔</strong>
+            </div>`;
+        },
+      },
       grid: { top: 28, left: '2%', right: '3%', bottom: '3%', containLabel: true },
       xAxis: {
         type: 'category',
         data: months,
         axisLine: { lineStyle: { color: '#CBD5E1' } },
-        axisLabel: { color: '#64748B', fontSize: 11 },
+        axisLabel: {
+          color: '#64748B',
+          fontSize: tradeTrendResult.xAxisType === 'hour' ? 10 : 11,
+          interval: tradeTrendResult.xAxisType === 'hour' ? 0 : (months.length > 25 ? 1 : 0),
+        },
       },
       yAxis: {
         type: 'value',
@@ -218,37 +574,40 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
         },
       ],
     };
-  }, [analysisCustomerType, tradeTimeRange]);
+  }, [tradeTrendResult]);
 
   // 消费金额趋势图 (独立折线图，不与订单混排坐标轴)
   const amountTrendOption = useMemo(() => {
-    let months: string[] = [];
-    let baseAmounts: number[] = [];
-
-    if (tradeTimeRange === 'today') {
-      months = ['02:00', '06:00', '10:00', '14:00', '18:00', '22:00'];
-      baseAmounts = [1.2, 3.5, 9.8, 14.2, 8.4, 5.5];
-    } else if (tradeTimeRange === 'week') {
-      months = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-      baseAmounts = [34.0, 45.5, 52.0, 48.0, 58.5, 26.5, 20.0];
-    } else if (tradeTimeRange === 'month') {
-      months = ['第1周', '第2周', '第3周', '第4周'];
-      baseAmounts = [280.0, 310.0, 330.0, 340.0];
-    } else {
-      months = ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08'];
-      baseAmounts = [780.0, 920.0, 1150.0, 1080.0, 1220.0, 1260.0];
-    }
-    const multipliers = analysisCustomerType === 'all' ? 1 : analysisCustomerType === 'company' ? 0.95 : 0.05;
-    const data = baseAmounts.map((v) => +(v * multipliers).toFixed(1));
+    const months = tradeTrendResult.dates;
+    const data = tradeTrendResult.amountData;
 
     return {
-      tooltip: { trigger: 'axis' },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          if (!Array.isArray(params) || params.length === 0) return '';
+          const title = tradeTrendResult.xAxisType === 'hour'
+            ? `时段：当日 ${params[0].name}`
+            : tradeTrendResult.xAxisType === 'month'
+            ? `月份：${params[0].name}`
+            : `日期：${params[0].name}`;
+          return `<div style="font-size:12px;font-weight:600;color:#1e293b;margin-bottom:4px;">${title}</div>
+            <div style="font-size:12px;color:#475569;display:flex;justify-content:space-between;gap:16px;">
+              <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:${params[0].color};margin-right:6px;"></span>消费金额:</span>
+              <strong>${params[0].value} 万元</strong>
+            </div>`;
+        },
+      },
       grid: { top: 28, left: '2%', right: '3%', bottom: '3%', containLabel: true },
       xAxis: {
         type: 'category',
         data: months,
         axisLine: { lineStyle: { color: '#CBD5E1' } },
-        axisLabel: { color: '#64748B', fontSize: 11 },
+        axisLabel: {
+          color: '#64748B',
+          fontSize: tradeTrendResult.xAxisType === 'hour' ? 10 : 11,
+          interval: tradeTrendResult.xAxisType === 'hour' ? 0 : (months.length > 25 ? 1 : 0),
+        },
       },
       yAxis: {
         type: 'value',
@@ -281,17 +640,23 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
         },
       ],
     };
-  }, [analysisCustomerType, tradeTimeRange]);
+  }, [tradeTrendResult]);
 
   // =========================================================================
   // 2. 产品订购部分状态与逻辑
   // =========================================================================
-  const newProductCountValues = {
-    today: 1,
-    week: 6,
-    month: 22,
-    year: 94,
-  };
+  const newProductCount = useMemo(() => {
+    if (effectiveTimeRange === 'custom') {
+      return tradeTrendResult.newProducts;
+    }
+    const map = {
+      today: 1,
+      week: 6,
+      month: 22,
+      year: 94,
+    };
+    return map[effectiveTimeRange as 'today' | 'week' | 'month' | 'year'] || map.year;
+  }, [effectiveTimeRange, tradeTrendResult]);
 
   // 筛选：需求方类型与产品类别
   const [productOrderCustType, setProductOrderCustType] = useState<'全部' | '企业' | '个人用户'>('全部');
@@ -673,65 +1038,6 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* 顶部统计周期工具栏 (消费分析 / 产品订购) */}
-      {activeTab !== 'orders' && (
-        <div className="bg-white rounded-md border border-slate-200/90 shadow-xs px-4 py-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-3.5 bg-blue-600 rounded-xs" />
-            <span className="text-xs font-bold text-slate-800">
-              {activeTab === 'analysis' ? '消费趋势与指标分析' : '产商品订购数据统计'}
-            </span>
-          </div>
-
-          {/* 右上角统一时间选择Tab (包含当日) */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-medium hidden sm:inline">统计周期:</span>
-            <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs font-medium text-slate-600 shadow-2xs">
-              <button
-                type="button"
-                id="btn-trade-time-today"
-                onClick={() => setTradeTimeRange('today')}
-                className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                  tradeTimeRange === 'today' ? 'bg-white font-semibold text-blue-600 shadow-2xs' : 'hover:text-slate-900 text-slate-600'
-                }`}
-              >
-                当日
-              </button>
-              <button
-                type="button"
-                id="btn-trade-time-week"
-                onClick={() => setTradeTimeRange('week')}
-                className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                  tradeTimeRange === 'week' ? 'bg-white font-semibold text-blue-600 shadow-2xs' : 'hover:text-slate-900 text-slate-600'
-                }`}
-              >
-                近一周
-              </button>
-              <button
-                type="button"
-                id="btn-trade-time-month"
-                onClick={() => setTradeTimeRange('month')}
-                className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                  tradeTimeRange === 'month' ? 'bg-white font-semibold text-blue-600 shadow-2xs' : 'hover:text-slate-900 text-slate-600'
-                }`}
-              >
-                近一月
-              </button>
-              <button
-                type="button"
-                id="btn-trade-time-year"
-                onClick={() => setTradeTimeRange('year')}
-                className={`px-3 py-1 rounded transition-all cursor-pointer ${
-                  tradeTimeRange === 'year' ? 'bg-white font-semibold text-blue-600 shadow-2xs' : 'hover:text-slate-900 text-slate-600'
-                }`}
-              >
-                近一年
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ======================= Tab 1: 消费分析 ======================= */}
       {activeTab === 'analysis' && (
         <div className="space-y-4">
@@ -842,13 +1148,15 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
                     周期新增指标
                   </h2>
                   <span className="text-[11px] text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                    {tradeTimeRange === 'today'
+                    {effectiveTimeRange === 'today'
                       ? '当日'
-                      : tradeTimeRange === 'week'
+                      : effectiveTimeRange === 'week'
                       ? '近一周'
-                      : tradeTimeRange === 'month'
+                      : effectiveTimeRange === 'month'
                       ? '近一月'
-                      : '近一年'}统计
+                      : effectiveTimeRange === 'year'
+                      ? '近一年'
+                      : `自选(${tradeTrendResult.diffDays}天)`}统计
                   </span>
                 </div>
               </div>
@@ -862,22 +1170,24 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
                       新增消费金额
                     </span>
                     <span className="text-[11px] text-blue-600 font-medium">
-                      {tradeTimeRange === 'today' ? '当日' : tradeTimeRange === 'week' ? '近一周' : tradeTimeRange === 'month' ? '近一月' : '近一年'}
+                      {effectiveTimeRange === 'today'
+                        ? '当日'
+                        : effectiveTimeRange === 'week'
+                        ? '近一周'
+                        : effectiveTimeRange === 'month'
+                        ? '近一月'
+                        : effectiveTimeRange === 'year'
+                        ? '近一年'
+                        : '自选'}
                     </span>
                   </div>
                   <div className="py-2.5">
                     <div className="text-2xl font-bold text-slate-900 tracking-tight">
-                      {tradeTimeRange === 'today'
-                        ? analysisAmountData.todayNew
-                        : tradeTimeRange === 'year'
-                        ? analysisAmountData.yearNew
-                        : tradeTimeRange === 'month'
-                        ? analysisAmountData.monthNew
-                        : analysisAmountData.weekNew}
+                      {currentPeriodAmount.toLocaleString()}
                       <span className="text-xs font-normal text-slate-500 ml-1">万元</span>
                     </div>
                     <div className="text-[11px] text-slate-400 mt-1">
-                      展示当前筛选周期（{tradeTimeRange === 'today' ? '当日' : tradeTimeRange === 'week' ? '近一周' : tradeTimeRange === 'month' ? '近一月' : '近一年'}）内新产生结算消费金额
+                      展示当前筛选周期（{effectiveTimeRange === 'today' ? '当日' : effectiveTimeRange === 'week' ? '近一周' : effectiveTimeRange === 'month' ? '近一月' : effectiveTimeRange === 'year' ? '近一年' : `${effectiveStartDate} 至 ${effectiveEndDate}`}）内新产生结算消费金额
                     </div>
                   </div>
                 </div>
@@ -890,22 +1200,24 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
                       新增订单数
                     </span>
                     <span className="text-[11px] text-blue-600 font-medium">
-                      {tradeTimeRange === 'today' ? '当日' : tradeTimeRange === 'week' ? '近一周' : tradeTimeRange === 'month' ? '近一月' : '近一年'}
+                      {effectiveTimeRange === 'today'
+                        ? '当日'
+                        : effectiveTimeRange === 'week'
+                        ? '近一周'
+                        : effectiveTimeRange === 'month'
+                        ? '近一月'
+                        : effectiveTimeRange === 'year'
+                        ? '近一年'
+                        : '自选'}
                     </span>
                   </div>
                   <div className="py-2.5">
                     <div className="text-2xl font-bold text-slate-900 tracking-tight">
-                      {tradeTimeRange === 'today'
-                        ? analysisOrderData.todayNew
-                        : tradeTimeRange === 'year'
-                        ? analysisOrderData.yearNew
-                        : tradeTimeRange === 'month'
-                        ? analysisOrderData.monthNew
-                        : analysisOrderData.weekNew}
+                      {currentPeriodOrders.toLocaleString()}
                       <span className="text-xs font-normal text-slate-500 ml-1">笔</span>
                     </div>
                     <div className="text-[11px] text-slate-400 mt-1">
-                      展示当前筛选周期（{tradeTimeRange === 'today' ? '当日' : tradeTimeRange === 'week' ? '近一周' : tradeTimeRange === 'month' ? '近一月' : '近一年'}）内新创建生效订单笔数
+                      展示当前筛选周期（{effectiveTimeRange === 'today' ? '当日' : effectiveTimeRange === 'week' ? '近一周' : effectiveTimeRange === 'month' ? '近一月' : effectiveTimeRange === 'year' ? '近一年' : `${effectiveStartDate} 至 ${effectiveEndDate}`}）内新创建生效订单笔数
                     </div>
                   </div>
                 </div>
@@ -913,42 +1225,72 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
             </div>
           </div>
 
-          {/* 下方独立展示两个趋势图 (严格遵守：不放在同一个坐标轴中) */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 订单趋势图 */}
+          {/* 独立展示两个趋势图：按用户要求分两行展示，避免一行并排显得过于拥挤 */}
+          <div className="space-y-4">
+            {/* 第一行：订单趋势图 (全宽展示) */}
             <div className="bg-white rounded-md border border-slate-200/90 shadow-xs p-4 flex flex-col">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-3 bg-blue-600 rounded-xs" />
                   <span className="text-xs font-bold text-slate-800 tracking-wide">
-                    订单趋势 ({tradeTimeRange === 'today' ? '按时段' : tradeTimeRange === 'week' ? '按日' : tradeTimeRange === 'month' ? '按周' : '按月'})
+                    订单趋势 ({effectiveTimeRange === 'today' ? '按时段' : effectiveTimeRange === 'year' ? '按月' : '按日'})
                   </span>
                 </div>
                 <span className="text-[11px] text-slate-400">
-                  {tradeTimeRange === 'today' ? '当日各时段订单走势' : tradeTimeRange === 'week' ? '近7天每日订单走势' : tradeTimeRange === 'month' ? '近四周每周订单走势' : '近6个月订单笔数走势'}
+                  {tradeTrendResult.subLabel}
                 </span>
               </div>
-              <div className="h-[260px] w-full">
-                <EChartWrapper option={orderTrendOption} height="100%" />
-              </div>
+              {tradeTrendResult.isOverLimit ? (
+                <div className="h-[280px] w-full flex flex-col items-center justify-center bg-slate-50/70 rounded-md border border-dashed border-slate-200 p-6 text-center">
+                  <div className="w-10 h-10 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mb-2.5 text-amber-600">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-700 mb-1">
+                    自选时间段跨度超过 30 天，折线图已隐藏
+                  </p>
+                  <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+                    您当前选择的时间跨度为 <span className="font-semibold text-amber-600">{tradeTrendResult.diffDays}</span> 天（{effectiveStartDate} 至 {effectiveEndDate}）。
+                    根据展示规则，时间跨度大于 30 天时不展示走势折线图；如需查看每日趋势，请将时间跨度缩短至 30 天以内。
+                  </p>
+                </div>
+              ) : (
+                <div className="h-[280px] w-full">
+                  <EChartWrapper option={orderTrendOption} height="100%" />
+                </div>
+              )}
             </div>
 
-            {/* 消费金额趋势图 */}
+            {/* 第二行：消费金额趋势图 (全宽展示) */}
             <div className="bg-white rounded-md border border-slate-200/90 shadow-xs p-4 flex flex-col">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-3 bg-blue-600 rounded-xs" />
                   <span className="text-xs font-bold text-slate-800 tracking-wide">
-                    消费金额趋势 ({tradeTimeRange === 'today' ? '按时段' : tradeTimeRange === 'week' ? '按日' : tradeTimeRange === 'month' ? '按周' : '按月'})
+                    消费金额趋势 ({effectiveTimeRange === 'today' ? '按时段' : effectiveTimeRange === 'year' ? '按月' : '按日'})
                   </span>
                 </div>
                 <span className="text-[11px] text-slate-400">
-                  {tradeTimeRange === 'today' ? '当日各时段消费走势' : tradeTimeRange === 'week' ? '近7天每日流水走势' : tradeTimeRange === 'month' ? '近四周每周流水走势' : '近6个月消费流水走势'}
+                  {tradeTrendResult.subLabel}
                 </span>
               </div>
-              <div className="h-[260px] w-full">
-                <EChartWrapper option={amountTrendOption} height="100%" />
-              </div>
+              {tradeTrendResult.isOverLimit ? (
+                <div className="h-[280px] w-full flex flex-col items-center justify-center bg-slate-50/70 rounded-md border border-dashed border-slate-200 p-6 text-center">
+                  <div className="w-10 h-10 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mb-2.5 text-amber-600">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-700 mb-1">
+                    自选时间段跨度超过 30 天，折线图已隐藏
+                  </p>
+                  <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+                    您当前选择的时间跨度为 <span className="font-semibold text-amber-600">{tradeTrendResult.diffDays}</span> 天（{effectiveStartDate} 至 {effectiveEndDate}）。
+                    根据展示规则，时间跨度大于 30 天时不展示走势折线图；如需查看每日趋势，请将时间跨度缩短至 30 天以内。
+                  </p>
+                </div>
+              ) : (
+                <div className="h-[280px] w-full">
+                  <EChartWrapper option={amountTrendOption} height="100%" />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -989,16 +1331,24 @@ export const DemandTradeView: React.FC<DemandTradeViewProps> = ({
                   B/C新增订购产品数
                 </span>
                 <span className="text-[11px] text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                  {tradeTimeRange === 'today' ? '当日' : tradeTimeRange === 'week' ? '近一周' : tradeTimeRange === 'month' ? '近一月' : '近一年'}
+                  {effectiveTimeRange === 'today'
+                    ? '当日'
+                    : effectiveTimeRange === 'week'
+                    ? '近一周'
+                    : effectiveTimeRange === 'month'
+                    ? '近一月'
+                    : effectiveTimeRange === 'year'
+                    ? '近一年'
+                    : `自选(${tradeTrendResult.diffDays}天)`}
                 </span>
               </div>
               <div className="py-2.5">
                 <div className="text-2xl font-bold text-slate-900 tracking-tight">
-                  {newProductCountValues[tradeTimeRange]}
+                  {newProductCount}
                   <span className="text-xs font-normal text-slate-500 ml-1">款</span>
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">
-                  展示当前筛选周期（{tradeTimeRange === 'today' ? '当日' : tradeTimeRange === 'week' ? '近一周' : tradeTimeRange === 'month' ? '近一月' : '近一年'}）首次获需求方下单订购的去重产商品数
+                  展示当前筛选周期（{effectiveTimeRange === 'today' ? '当日' : effectiveTimeRange === 'week' ? '近一周' : effectiveTimeRange === 'month' ? '近一月' : effectiveTimeRange === 'year' ? '近一年' : `${effectiveStartDate} 至 ${effectiveEndDate}`}）首次获需求方下单订购的去重产商品数
                 </div>
               </div>
             </div>
